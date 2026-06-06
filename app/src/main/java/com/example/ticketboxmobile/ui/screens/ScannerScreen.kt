@@ -5,6 +5,7 @@ import android.util.Size
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,6 +38,33 @@ fun ScannerScreen(
 
     var scannedCode by remember { mutableStateOf<String?>(null) }
     var isScanningEnabled by remember { mutableStateOf(true) }
+    var showExitDialog by remember { mutableStateOf(false) }
+
+    BackHandler {
+        showExitDialog = true
+    }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { Text("Xác nhận thoát") },
+            text = { Text("Bạn sắp thoát khỏi chế độ Máy Quét. Toàn bộ nhật ký (logs) sẽ bị xoá.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showExitDialog = false
+                    p2pManager.clearLogs()
+                    onBack()
+                }) {
+                    Text("Đồng ý")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) {
+                    Text("Hủy")
+                }
+            }
+        )
+    }
 
     DisposableEffect(Unit) {
         p2pManager.startDiscovery("Gate-Scanner-1")
@@ -199,7 +227,7 @@ fun ScannerScreen(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { showExitDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("Quay lại")
             }
         }

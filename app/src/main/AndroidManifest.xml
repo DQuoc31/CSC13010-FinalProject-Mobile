@@ -17,6 +17,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <!-- Android 13+ Nearby WiFi permissions -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="true"
@@ -26,7 +27,8 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.TicketboxMobile">
+        android:theme="@style/Theme.TicketboxMobile"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

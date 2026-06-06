@@ -24,4 +24,10 @@ interface TicketDao {
 
     @Query("SELECT * FROM tickets ORDER BY checkInTime DESC")
     suspend fun getAllTickets(): List<TicketEntity>
+
+    @Query("SELECT * FROM tickets WHERE isCheckedIn = 1")
+    suspend fun getCheckedInTickets(): List<TicketEntity>
+
+    @Query("DELETE FROM tickets")
+    suspend fun deleteAll()
 }

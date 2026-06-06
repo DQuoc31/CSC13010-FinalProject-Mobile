@@ -64,6 +64,9 @@ dependencies {
     
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.play.services.nearby)
+    
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.converter.gson)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

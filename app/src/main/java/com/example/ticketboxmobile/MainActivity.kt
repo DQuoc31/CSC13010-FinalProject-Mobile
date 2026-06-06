@@ -12,6 +12,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -20,6 +24,7 @@ import com.example.ticketboxmobile.p2p.P2PManager
 import com.example.ticketboxmobile.ui.screens.HubScreen
 import com.example.ticketboxmobile.ui.screens.RoleSelectionScreen
 import com.example.ticketboxmobile.ui.screens.ScannerScreen
+import com.example.ticketboxmobile.ui.screens.LoginScreen
 import com.example.ticketboxmobile.ui.theme.TicketboxMobileTheme
 
 class MainActivity : ComponentActivity() {
@@ -57,6 +62,10 @@ class MainActivity : ComponentActivity() {
 
         val p2pManager = P2PManager(this)
         val ticketDao = TicketDatabase.getDatabase(this).ticketDao()
+        
+        val sharedPref = getSharedPreferences("ticketbox_prefs", android.content.Context.MODE_PRIVATE)
+        val savedToken = sharedPref.getString("token", null)
+        val startDest = if (savedToken != null) "role_selection" else "login"
 
         setContent {
             TicketboxMobileTheme {
@@ -66,17 +75,48 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val navController = rememberNavController()
 
-                    NavHost(navController = navController, startDestination = "role_selection") {
+                    NavHost(navController = navController, startDestination = startDest) {
+                        composable("login") {
+                            LoginScreen(
+                                onLoginSuccess = { 
+                                    navController.navigate("role_selection") {
+                                        popUpTo("login") { inclusive = true }
+                                    }
+                                }
+                            )
+                        }
                         composable("role_selection") {
                             RoleSelectionScreen(
-                                onSelectHub = { navController.navigate("hub") },
-                                onSelectScanner = { navController.navigate("scanner") }
+                                onSelectHub = { 
+                                    lifecycleScope.launch(Dispatchers.IO) {
+                                        ticketDao.deleteAll()
+                                        withContext(Dispatchers.Main) {
+                                            navController.navigate("hub")
+                                        }
+                                    }
+                                },
+                                onSelectScanner = { 
+                                    lifecycleScope.launch(Dispatchers.IO) {
+                                        ticketDao.deleteAll()
+                                        withContext(Dispatchers.Main) {
+                                            navController.navigate("scanner")
+                                        }
+                                    }
+                                },
+                                onLogout = {
+                                    sharedPref.edit().remove("token").apply()
+                                    navController.navigate("login") {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
                             )
                         }
                         composable("hub") {
+                            val token = sharedPref.getString("token", "") ?: ""
                             HubScreen(
                                 p2pManager = p2pManager,
                                 ticketDao = ticketDao,
+                                token = token,
                                 onBack = { navController.popBackStack() }
                             )
                         }

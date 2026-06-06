@@ -130,6 +130,10 @@ class P2PManager(private val context: Context) {
         _logs.value = listOf(msg) + _logs.value
     }
 
+    fun clearLogs() {
+        _logs.value = emptyList()
+    }
+
     fun stop() {
         connectionsClient.stopAdvertising()
         connectionsClient.stopDiscovery()
