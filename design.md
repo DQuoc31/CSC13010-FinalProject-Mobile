@@ -310,6 +310,7 @@ erDiagram
 
 | Tên Key Redis | Loại dữ liệu | Mục đích | Thời gian sống (TTL) |
 | :--- | :--- | :--- | :--- |
+| `events:published` | **String** (JSON) | Lưu danh sách các sự kiện đã được xuất bản và số vé còn lại với mỗi loại vé | Vô hạn (hoặc cho tới khi sự kiện kết thúc). |
 | `event:{event_id}:type:{ticket_type_id}:available` | **String** (Number) | Lưu trữ số vé còn lại khả dụng của hạng vé cụ thể phục vụ việc Check & Hold siêu tốc bằng Lua Script. | Vô hạn (hoặc cho tới khi sự kiện kết thúc). |
 | `user:{user_id}:event:{event_id}:type:{ticket_type_id}:bought` | **String** (Number) | Lưu số lượng vé hạng này mà user cụ thể đã mua/đang giữ để kiểm tra quota limit. | Vô hạn (hoặc cập nhật lại khi hủy order quá hạn). |
 | `payment:idem:{idempotency_key}` | **String** (URL) | Cache URL thanh toán VNPAY của hóa đơn tương ứng để trả lại ngay nếu người dùng click đúp hoặc mạng retry. | `3600` giây (1 giờ). |

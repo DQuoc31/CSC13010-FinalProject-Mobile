@@ -9,6 +9,13 @@ android {
     namespace = "com.example.ticketboxmobile"
     compileSdk = 36
 
+    val localProperties = java.util.Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localProperties.load(java.io.FileInputStream(localPropertiesFile))
+    }
+    val apiUrl = localProperties.getProperty("BASE_URL") ?: "\"http://10.0.2.2:3000\""
+
     defaultConfig {
         applicationId = "com.example.ticketboxmobile"
         minSdk = 27
@@ -17,6 +24,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "BASE_URL", apiUrl)
     }
 
     buildTypes {
@@ -37,6 +45,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

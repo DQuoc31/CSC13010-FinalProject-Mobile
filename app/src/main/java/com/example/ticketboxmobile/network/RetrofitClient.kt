@@ -3,9 +3,11 @@ package com.example.ticketboxmobile.network
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
+import com.example.ticketboxmobile.BuildConfig
+
 object RetrofitClient {
-    // 10.0.2.2 is the special alias to your host loopback interface in Android Emulator
-    private const val BASE_URL = "http://10.0.2.2:3000"
+    // URL is now hidden in local.properties and injected via BuildConfig
+    private val BASE_URL = BuildConfig.BASE_URL
 
     val instance: AuthApi by lazy {
         val retrofit = Retrofit.Builder()
