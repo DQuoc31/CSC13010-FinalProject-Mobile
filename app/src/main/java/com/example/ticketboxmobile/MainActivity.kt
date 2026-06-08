@@ -87,19 +87,15 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("role_selection") {
                             RoleSelectionScreen(
-                                onSelectHub = { 
+                                onSelectRole = { role ->
                                     lifecycleScope.launch(Dispatchers.IO) {
                                         ticketDao.deleteAll()
                                         withContext(Dispatchers.Main) {
-                                            navController.navigate("hub")
-                                        }
-                                    }
-                                },
-                                onSelectScanner = { 
-                                    lifecycleScope.launch(Dispatchers.IO) {
-                                        ticketDao.deleteAll()
-                                        withContext(Dispatchers.Main) {
-                                            navController.navigate("scanner")
+                                            if (role == "HUB") {
+                                                navController.navigate("hub")
+                                            } else {
+                                                navController.navigate("scanner")
+                                            }
                                         }
                                     }
                                 },

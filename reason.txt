@@ -1,0 +1,32 @@
+Trong thực tế triển khai các sự kiện âm nhạc quy mô lớn (như Anh Trai Say Hi, BlackPink...), việc chuẩn hóa thiết bị và chỉ sử dụng Android cho nhân sự soát vé là lựa chọn tối ưu và phổ biến hơn rất nhiều.
+
+Dưới đây là sự đối chiếu giữa thực tế vận hành và kỹ thuật để bạn thấy rõ tại sao lại như vậy:
+
+1. Góc độ Vận hành Kinh doanh (Business & Operations)
+Không dùng thiết bị cá nhân (No BYOD): Các công ty tổ chức sự kiện lớn hầu như không bao giờ để nhân sự thời vụ dùng điện thoại cá nhân của họ để soát vé. Rủi ro là quá lớn: điện thoại nhân viên có thể hết pin, camera mờ, dính mã độc, hay tệ nhất là màn hình đang quét vé thì có tin nhắn/cuộc gọi rác chen ngang làm chậm tiến độ.
+
+Thuê/Mua thiết bị đồng bộ: Doanh nghiệp thường sẽ thuê hoặc mua hẳn một lô thiết bị Android giá rẻ (như Samsung Galaxy dòng A, Xiaomi) hoặc các máy PDA quét mã vạch chuyên dụng chạy Android. Các máy này được sạc đầy, cài đặt chế độ Kiosk (chỉ được mở đúng app TicketBox, khóa mọi tính năng khác), và phát cho nhân viên trước giờ G.
+
+Chi phí hiệu quả: Điện thoại Android có lợi thế tuyệt đối về giá thành đầu tư so với việc trang bị một dàn iPhone cho nhân sự.
+
+2. Góc độ Kỹ thuật và Chi phí phát triển (Technical & Development)
+Nếu bạn ép hệ thống phải chạy cross-platform (iOS & Android) để kết nối P2P offline, bạn đang "tự bắn vào chân mình" vì những rủi ro sau:
+
+Rủi ro từ iOS: Apple cực kỳ khắt khe với các tác vụ chạy ngầm và kết nối mạng nội bộ. Hệ điều hành iOS có thể tự động ngắt kết nối Wi-Fi Local để tiết kiệm pin bất cứ lúc nào, khiến hệ thống soát vé bị đứt gãy giữa chừng.
+
+Độ trễ phát triển (Development Overhead): Việc viết các luồng xử lý lỗi (error handling) để duy trì kết nối mượt mà giữa hai hệ điều hành khác biệt về giao thức phần cứng tốn rất nhiều thời gian và nguồn lực test.
+
+Sức mạnh của Native: Thay vì vật lộn với các bridge phức tạp của các framework đa nền tảng, việc tập trung xây dựng một ứng dụng Android gốc (Native) mang lại hiệu năng cao nhất. Tận dụng các công cụ hiện đại như Jetpack Compose để làm UI nhanh gọn, kết hợp với các API mức thấp như Wi-Fi Direct sẽ giúp ứng dụng kiểm soát phần cứng hoàn toàn, đảm bảo mạng P2P hoạt động trơn tru, không có độ trễ và không bị hệ điều hành "kill" giữa chừng.
+
+Đề xuất cách viết vào đồ án (Design Decision)
+Bạn hoàn toàn có thể (và rất nên) bảo vệ quan điểm "Chỉ dùng Android cho App Soát vé" trong tài liệu Blueprint để ghi điểm thực tế. Hãy trình bày nó dưới dạng một quyết định kiến trúc:
+
+Quyết định (ADR): Môi trường hoạt động của Ứng dụng Soát vé
+
+Giải pháp: Ứng dụng Mobile dành cho nhân viên soát vé (Staff App) sẽ được phát triển Native độc quyền trên hệ điều hành Android.
+
+Lý do Kỹ thuật: Android hỗ trợ chuẩn Wi-Fi Direct mở, cho phép thiết lập mạng LAN ảo ngang hàng (P2P Mesh) cực kỳ ổn định để đồng bộ trạng thái vé offline mà không lo bị hệ điều hành tự động ngắt kết nối nền (background kill) như iOS.
+
+Lý do Vận hành: Trong quy trình thực tế của các sự kiện lớn, ban tổ chức luôn cấp phát thiết bị PDA/Mobile Android chuẩn hóa đã được cài đặt sẵn Kiosk Mode cho nhân sự, thay vì để họ dùng điện thoại cá nhân (BYOD). Việc chỉ tập trung phát triển Android Native giúp tiết kiệm 50% chi phí R&D, giảm rủi ro lỗi tương thích phần cứng và tối đa hóa hiệu năng xử lý database nội bộ tại hiện trường.
+
+Quyết định này thể hiện nhóm bạn không chỉ biết code, mà còn biết thiết kế một hệ thống thực dụng, tiết kiệm tiền và giải quyết triệt để "nỗi đau" của doanh nghiệp.

@@ -6,26 +6,39 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.ticketboxmobile.p2p.P2PManager
+import com.example.ticketboxmobile.ui.theme.scan_valid_bg
+import com.example.ticketboxmobile.ui.theme.scan_invalid_bg
+import com.example.ticketboxmobile.ui.theme.scan_used_bg
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
+@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 @Composable
 fun ScannerScreen(
     p2pManager: P2PManager,
@@ -47,15 +60,18 @@ fun ScannerScreen(
     if (showExitDialog) {
         AlertDialog(
             onDismissRequest = { showExitDialog = false },
-            title = { Text("Xác nhận thoát") },
+            title = { Text("Xác nhận thoát", fontWeight = FontWeight.Bold) },
             text = { Text("Bạn sắp thoát khỏi chế độ Máy Quét. Toàn bộ nhật ký (logs) sẽ bị xoá.") },
             confirmButton = {
-                TextButton(onClick = {
-                    showExitDialog = false
-                    p2pManager.clearLogs()
-                    onBack()
-                }) {
-                    Text("Đồng ý")
+                Button(
+                    onClick = {
+                        showExitDialog = false
+                        p2pManager.clearLogs()
+                        onBack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Thoát")
                 }
             },
             dismissButton = {
@@ -77,158 +93,220 @@ fun ScannerScreen(
     LaunchedEffect(validationResult) {
         if (validationResult != null) {
             // Show result temporarily, then allow next scan
-            kotlinx.coroutines.delay(3000)
+            kotlinx.coroutines.delay(2500)
             p2pManager.clearValidationResult()
             scannedCode = null
             isScanningEnabled = true
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx)
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Camera Preview Layer
+        AndroidView(
+            factory = { ctx ->
+                val previewView = PreviewView(ctx)
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
 
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
+                cameraProviderFuture.addListener({
+                    val cameraProvider = cameraProviderFuture.get()
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setTargetResolution(Size(1280, 720))
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .build()
+
+                    val executor = Executors.newSingleThreadExecutor()
+                    imageAnalysis.setAnalyzer(executor) { imageProxy ->
+                        if (!isScanningEnabled) {
+                            imageProxy.close()
+                            return@setAnalyzer
                         }
 
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setTargetResolution(Size(1280, 720))
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-
-                        val executor = Executors.newSingleThreadExecutor()
-                        imageAnalysis.setAnalyzer(executor) { imageProxy ->
-                            if (!isScanningEnabled) {
-                                imageProxy.close()
-                                return@setAnalyzer
-                            }
-
-                            val mediaImage = imageProxy.image
-                            if (mediaImage != null) {
-                                val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                                val scanner = BarcodeScanning.getClient()
-                                scanner.process(image)
-                                    .addOnSuccessListener { barcodes ->
-                                        for (barcode in barcodes) {
-                                            if (barcode.valueType == Barcode.TYPE_TEXT) {
-                                                val qrValue = barcode.rawValue
-                                                if (qrValue != null && isScanningEnabled) {
-                                                    isScanningEnabled = false
-                                                    scannedCode = qrValue
-                                                    p2pManager.sendQrHashToHub(qrValue)
-                                                }
+                        val mediaImage = imageProxy.image
+                        if (mediaImage != null) {
+                            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                            val scanner = BarcodeScanning.getClient()
+                            scanner.process(image)
+                                .addOnSuccessListener { barcodes ->
+                                    for (barcode in barcodes) {
+                                        if (barcode.valueType == Barcode.TYPE_TEXT) {
+                                            val qrValue = barcode.rawValue
+                                            if (qrValue != null && isScanningEnabled) {
+                                                isScanningEnabled = false
+                                                scannedCode = qrValue
+                                                p2pManager.sendQrHashToHub(qrValue)
                                             }
                                         }
                                     }
-                                    .addOnFailureListener {
-                                        Log.e("Scanner", "Error scanning: ${it.message}")
-                                    }
-                                    .addOnCompleteListener {
-                                        imageProxy.close()
-                                    }
-                            } else {
-                                imageProxy.close()
-                            }
+                                }
+                                .addOnFailureListener {
+                                    Log.e("Scanner", "Error scanning: ${it.message}")
+                                }
+                                .addOnCompleteListener {
+                                    imageProxy.close()
+                                }
+                        } else {
+                            imageProxy.close()
                         }
-
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                        try {
-                            cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                cameraSelector,
-                                preview,
-                                imageAnalysis
-                            )
-                        } catch (exc: Exception) {
-                            Log.e("Scanner", "Use case binding failed", exc)
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
-
-                    previewView
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-
-            // Result Overlay
-            if (validationResult != null) {
-                val color = when (validationResult) {
-                    "VALID" -> Color.Green
-                    "USED" -> Color.Red
-                    else -> Color.Gray
-                }
-                val textMsg = when (validationResult) {
-                    "VALID" -> "VÉ HỢP LỆ"
-                    "USED" -> "VÉ ĐÃ SỬ DỤNG!"
-                    else -> "VÉ KHÔNG TỒN TẠI"
-                }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(color.copy(alpha = 0.7f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = textMsg,
-                            color = Color.White,
-                            style = MaterialTheme.typography.displaySmall
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Mã QR: $scannedCode",
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium
-                        )
                     }
-                }
-            } else if (scannedCode != null) {
-                // Waiting for Hub result
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = Color.White)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Đang chờ xác thực từ Máy trưởng...",
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
+
+                    val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                    try {
+                        cameraProvider.unbindAll()
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            cameraSelector,
+                            preview,
+                            imageAnalysis
+                        )
+                    } catch (exc: Exception) {
+                        Log.e("Scanner", "Use case binding failed", exc)
+                    }
+                }, ContextCompat.getMainExecutor(ctx))
+
+                previewView
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Overlay targeting reticle (optional, visual enhancement)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(250.dp)
+                .background(Color.Transparent)
+        )
+
+        // Top Bar overlay
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 40.dp, start = 16.dp, end = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilledIconButton(
+                onClick = { showExitDialog = true },
+                colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f))
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Đóng", tint = MaterialTheme.colorScheme.onSurface)
+            }
+            
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                modifier = Modifier.padding(horizontal = 8.dp)
+            ) {
+                Text(
+                    text = "MÁY QUÉT (SCANNER)",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
             }
         }
 
-        // Bottom logs panel
+        // Result & Logs Bottom Sheet Overlay
         Column(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(200.dp)
-                .padding(16.dp)
+                .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                .background(MaterialTheme.colorScheme.surface)
         ) {
-            Text("Logs P2P:", style = MaterialTheme.typography.titleSmall)
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(logs) { log ->
-                    Text(text = log, modifier = Modifier.padding(vertical = 2.dp), style = MaterialTheme.typography.bodySmall)
-                    Divider()
+            // Validation Result Animated Area
+            AnimatedVisibility(
+                visible = validationResult != null || scannedCode != null,
+                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                val color = when (validationResult) {
+                    "VALID" -> scan_valid_bg
+                    "USED" -> scan_used_bg
+                    "INVALID" -> scan_invalid_bg
+                    else -> MaterialTheme.colorScheme.primary
+                }
+                
+                val icon = when (validationResult) {
+                    "VALID" -> Icons.Default.CheckCircle
+                    "USED" -> Icons.Default.Warning
+                    "INVALID" -> Icons.Default.Clear
+                    else -> null
+                }
+                
+                val textMsg = when (validationResult) {
+                    "VALID" -> "VÉ HỢP LỆ"
+                    "USED" -> "VÉ ĐÃ SỬ DỤNG!"
+                    "INVALID" -> "VÉ KHÔNG TỒN TẠI"
+                    else -> "ĐANG XÁC THỰC..."
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(color)
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (icon != null) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(64.dp).padding(bottom = 8.dp)
+                            )
+                        } else {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.padding(bottom = 16.dp))
+                        }
+                        
+                        Text(
+                            text = textMsg,
+                            color = Color.White,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        if (scannedCode != null && validationResult != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Mã: $scannedCode",
+                                color = Color.White.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = { showExitDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("Quay lại")
+
+            // Logs Section
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 150.dp, max = 250.dp)
+                    .padding(24.dp)
+            ) {
+                Text(
+                    text = "Lịch sử kết nối",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    items(logs) { log ->
+                        Text(
+                            text = log,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                        Divider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                    }
+                }
             }
         }
     }

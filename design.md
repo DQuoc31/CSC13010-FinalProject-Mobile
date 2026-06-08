@@ -60,7 +60,7 @@ C4Container
     
     System_Boundary(c1, "TicketBox System") {
         Container(web_app, "Web Application", "React/Next.js", "Giao diện chính cho khán giả và Admin")
-        Container(mobile_app, "Mobile App", "Flutter/React Native", "Ứng dụng soát vé")
+        Container(mobile_app, "Mobile App", "Android Native (Kotlin)", "Ứng dụng soát vé offline P2P")
         
         Container(api_gateway, "API Gateway", "Nginx / Kong", "Rate Limiting, Routing, Auth")
         
@@ -365,47 +365,25 @@ erDiagram
         *   Số lượng vé: Lưu trong Redis Hash (`event:{id}:tickets`). Trả về kèm theo API chi tiết. Dữ liệu này luôn chuẩn xác theo thời gian thực nhờ Lua Script trừ trực tiếp.
 
 ### 4.6. Soát vé tại sự kiện (Offline Check-in)
-*   **Bài toán**: Sân vận động mạng chập chờn, không thể gọi API real-time, nhưng không được phép lọt vé giả/vé check-in 2 lần.
+*   **Bài toán**: Tại sân vận động mạng 3G/4G chập chờn hoặc mất hẳn, không thể gọi API real-time lên Server, nhưng hệ thống phải chống lọt vé giả và tuyệt đối ngăn chặn 1 vé lách qua 2 cổng khác nhau.
 *   **Các phương án**:
-    1.  *Chỉ online*: Bắt buộc có mạng. *Trade-off*: Chắc chắn fail ở sân vận động.
-    2.  *Đồng bộ offline*: Mobile app tải toàn bộ danh sách QR Hash hợp lệ của sự kiện đó về local (SQLite). Khi quét, kiểm tra tại local. Các máy quét đồng bộ với nhau qua LAN/Bluetooth, hoặc chờ có sóng sẽ gửi lên Server. *Trade-off*: Rủi ro nhỏ nếu 2 cổng quét cùng 1 vé gần như cùng lúc khi mất mạng hoàn toàn.
-*   **Chốt phương án**: **Phương án giải quyết: Mô hình Phân vùng vận hành & Mạng ngang hàng (P2P Local Cluster)**
+    1.  *Chỉ Online*: Thiết bị quét gọi API trực tiếp. *Trade-off*: Phụ thuộc 100% vào hạ tầng mạng sự kiện, nguy cơ gián đoạn soát vé dẫn đến vỡ trận ở cổng vào.
+    2.  *Đồng bộ phân tán (Mỗi máy tự lưu Database riêng)*: Mỗi máy quét tải toàn bộ Database về local. *Trade-off*: Tốc độ siêu nhanh, nhưng nếu mất mạng hoàn toàn, 1 người chụp màn hình vé gửi cho bạn bè đứng ở cổng khác thì cả 2 đều lọt (vì 2 máy quét không giao tiếp được với nhau).
+    3.  *Kiến trúc Hub-Spoke P2P (Máy Trưởng - Máy Quét)*: Một "Máy Trưởng" (Hub) tải Database hợp lệ về, các "Máy Quét" (Scanner) xung quanh kết nối trực tiếp với Hub qua mạng nội bộ (Wi-Fi Direct/Bluetooth).
+*   **Chốt phương án**: **Kiến trúc Hub-Spoke P2P (Máy Trưởng - Máy Quét) sử dụng Google Nearby Connections**.
+    *   *Lý do*: Xử lý triệt để bài toán "Double Check-in" (quét 2 lần) khi mất mạng Internet.
+    *   *Cơ chế hoạt động*: Máy Trưởng là "Single Source of Truth" duy nhất tại hiện trường. Nó lưu trữ Room Database tải từ Server về trước sự kiện. Các Máy Quét chỉ làm nhiệm vụ duy nhất là dùng Camera phân tích mã QR, sau đó truyền mã đó tới Hub qua mạng ngang hàng P2P không cần Internet. Hub kiểm tra, cập nhật trạng thái vé và trả kết quả về cho Scanner hiển thị Xanh/Đỏ. Do mọi truy vấn đều dồn về một Database Hub duy nhất, dù cắt mạng 100%, 1 vé không bao giờ đi qua được 2 cửa. Sau khi xong việc, chỉ Máy Trưởng cần cắm mạng để đồng bộ (Sync) dữ liệu Check-in ngược lên Backend.
 
-Thay vì bắt từng thiết bị gọi API lên Cloud hoặc triển khai các Router vật lý phức tạp tại hiện trường, hệ thống sử dụng kiến trúc Edge Computing kết hợp mạng nội bộ.
+### 4.7. Môi trường hoạt động của Ứng dụng Soát vé (Staff App)
+*   **Bài toán**: Nhân sự soát vé cần thiết bị ổn định, tốc độ phản hồi nhanh và khả năng chạy offline P2P không bị ngắt quãng.
+*   **Các phương án**:
+    1.  *Cross-platform (iOS & Android) / BYOD (Bring Your Own Device)*: Cho phép nhân viên dùng điện thoại cá nhân, code bằng React Native/Flutter. *Trade-off*: Rủi ro vận hành rất lớn (hết pin, camera mờ, tin nhắn rác chen ngang lúc đang quét). Kỹ thuật phức tạp do iOS cực kỳ khắt khe với tác vụ chạy ngầm, thường tự động ngắt kết nối Wi-Fi Local/Bluetooth để tiết kiệm pin khiến hệ thống soát vé offline bị đứt gãy giữa chừng.
+    2.  *Android Native độc quyền*: Ban tổ chức thuê hoặc mua lô thiết bị Android (PDA chuyên dụng hoặc dòng máy giá rẻ). *Trade-off*: Tốn chi phí cấp phát phần cứng nhưng kiểm soát được 100% sự cố.
+*   **Chốt phương án**: **Phát triển Native độc quyền trên Android**.
+    *   *Lý do Kỹ thuật*: Hệ điều hành Android hỗ trợ chuẩn Wi-Fi Direct mở, cho phép thiết lập mạng LAN ảo ngang hàng (P2P Mesh) bằng Google Nearby Connections cực kỳ ổn định. Nó không tự động kill các kết nối ngầm (background kill) như iOS. Việc phát triển thuần Native (Kotlin, Jetpack Compose) giúp tận dụng tối đa sức mạnh phần cứng, tối ưu hiệu năng CameraX và truy xuất Room Database (SQLite) tốc độ siêu tốc.
+    *   *Lý do Vận hành (Business)*: Các sự kiện lớn không bao giờ dùng chính sách BYOD. Ban tổ chức luôn cấp phát thiết bị Android được sạc đầy và khóa trong chế độ Kiosk Mode (chỉ hiển thị đúng app TicketBox, không thể thoát ra). Việc tập trung viết app Android Native giúp tiết kiệm 50% chi phí R&D, giảm rủi ro tương thích và phù hợp 100% với thực tiễn ngành tổ chức sự kiện.
 
-1. Kiến trúc phân cụm (Topology)
-
-Phân vùng vận hành: Ban tổ chức bố trí luồng di chuyển của khán giả thành các cụm cổng chuyên biệt theo từng loại vé (VD: Cụm Cổng SVIP ở khán đài A, Cụm Cổng GA ở khán đài B).
-
-Kết nối Peer-to-Peer (P2P): Các thiết bị Mobile App tại mỗi cụm cổng tự động kết nối trực tiếp với nhau thông qua công nghệ Google Nearby Connections API / Wi-Fi Direct. Giải pháp này không cần Router vật lý, tự động thiết lập mạng LAN ảo giữa các thiết bị bằng sóng Wi-Fi nội bộ.
-
-2. Phân bổ vai trò thiết bị trong cụm
-
-Máy trưởng (Local Hub / Group Owner):
-
-Setup: Một thiết bị đặt cố định tại bàn quản lý cổng, được cắm sạc dự phòng liên tục và trang bị tản nhiệt sò lạnh để ngăn chặn hiện tượng giảm xung nhịp do quá nhiệt (Thermal Throttling) khi phải xử lý mạng liên tục.
-
-Nhiệm vụ: Đóng vai trò là Local Server. Tải trước (Pre-load) database SQLite chứa toàn bộ chuỗi QR_Code_Hash hợp lệ của sự kiện. Quản lý kết nối mạng nội bộ và đồng bộ trạng thái vé. Không dùng để cầm tay quét vé.
-
-Máy con (Scanner / Peer):
-
-Setup: Các thiết bị di động gọn nhẹ do nhân sự cầm trên tay để quét vé trực tiếp.
-
-Nhiệm vụ: Quét QR Code, gửi mã băm sang Máy trưởng qua mạng P2P, nhận kết quả đối chiếu và hiển thị cho nhân sự.
-
-3. Luồng xử lý và Chống gian lận
-
-Chuẩn bị (Online): Trước giờ mở cổng, Máy trưởng kết nối 4G/Wi-Fi để tải bản sao dữ liệu QR_Code_Hash mới nhất từ Cloud Server.
-
-Soát vé (Offline): Khi Máy con quét 1 vé, mã hash lập tức được gửi qua LAN nội bộ (< 5ms) tới Máy trưởng. Máy trưởng đánh dấu vé thành trạng thái "Đã sử dụng", lưu kèm device_id và thời gian thực, sau đó trả kết quả "Hợp lệ" về Máy con.
-
-Chặn Double-Spending cùng cụm: Nếu khán giả chụp ảnh QR gửi cho bạn bè và đi vào cùng cụm cổng, khi người thứ 2 đưa vé ra quét ở một Máy con khác, Máy trưởng sẽ tra cứu database cục bộ, phát hiện vé đã được check-in trước đó vài giây/vài phút và lập tức trả về tín hiệu cảnh báo gian lận.
-
-Chặn đi sai cổng / Khác cụm: Nếu khán giả cầm vé GA đi vào cụm cổng SVIP, Máy trưởng tại cụm SVIP sẽ đối chiếu thấy mã băm này không tồn tại trong tập dữ liệu của cổng mình (hoặc nhận diện sai dải mã) và từ chối ngay lập tức.
-
-Đồng bộ cuối ngày (Sync-up): Khi sự kiện kết thúc hoặc khi có mạng ổn định, Máy trưởng kết nối Internet và đẩy toàn bộ nhật ký check-in (Sync Log) lên Cloud Server.
-
-### 4.7. Đồng bộ danh sách khách mời (Sponsor CSV)
+### 4.8. Đồng bộ danh sách khách mời (Sponsor CSV)
 *   **Bài toán**: Hệ thống nhãn hàng ném file CSV lúc nửa đêm, không gọi API.
 *   **Các phương án**:
     1.  *API upload thủ công*: Admin phải dậy lúc nửa đêm tải file. *Trade-off*: Bất tiện.
