@@ -11,7 +11,7 @@ Tài liệu này trình bày các quyết định thiết kế kiến trúc, cô
     *   *Mô tả*: Toàn bộ backend (Booking, Event, Payment, Admin) nằm chung một source code và chạy trên cùng một tiến trình.
     *   *Trade-off*: Dễ phát triển, dễ deploy ban đầu. Tuy nhiên, khi luồng Booking chịu tải 80.000 users/5 phút, toàn bộ hệ thống (kể cả Admin hay Event) cũng sẽ bị ảnh hưởng hoặc sập theo. Khó scale độc lập từng thành phần.
 *   **Phương án 2: Microservices Architecture (Kiến trúc vi dịch vụ)**
-    *   *Mô tả*: Chia hệ thống thành các service độc lập: `API Gateway`, `Event Service`, `Booking Service`, `Payment Service`, `Worker Service`.
+    *   *Mô tả*: Chia hệ thống thành các service độc lập: `API Gateway`, `Event Service`, `Booking Service`, `Payment Service`, `Email Service`, `AI Service`.
     *   *Trade-off*: Khả năng scale độc lập rất tốt (chỉ cần scale `Booking Service` khi mở bán vé). Rủi ro hệ thống thấp khi một service chết. Nhược điểm là phức tạp trong triển khai, cần quản lý giao tiếp mạng, data consistency (nhất quán dữ liệu) khó khăn hơn.
 *   **Phương án 3: Modular Monolith**
     *   *Mô tả*: Source code vẫn nằm chung nhưng chia module rạch ròi.
@@ -67,7 +67,8 @@ C4Container
         Container(booking_service, "Booking Service", "Node.js/Go", "Mua vé, giữ chỗ, Virtual Waiting Room")
         Container(event_service, "Event Service", "Node.js/Go", "Quản lý concert, sơ đồ ghế")
         Container(payment_service, "Payment Service", "Node.js/Go", "Thanh toán, chống trừ 2 lần")
-        Container(worker_service, "Background Workers", "Python/Node.js", "Import CSV, Xử lý AI, Gửi Email")
+        Container(email_service, "Email Service", "Node.js", "Gửi E-Ticket và nhắc nhở")
+        Container(ai_service, "AI Service", "Python/Node.js", "Import CSV, Xử lý AI")
         
         ContainerDb(db_postgres, "Relational Database", "PostgreSQL", "Lưu Data: User, Event, Order")
         ContainerDb(db_redis, "In-Memory Store", "Redis", "Cache, Rate Limiting, Lua Script khóa vé")
@@ -93,7 +94,8 @@ C4Container
     
     Rel(booking_service, msg_broker, "Publish Event")
     Rel(msg_broker, payment_service, "Subscribe")
-    Rel(msg_broker, worker_service, "Subscribe")
+    Rel(msg_broker, email_service, "Subscribe")
+    Rel(msg_broker, ai_service, "Subscribe")
 ```
 
 ---
@@ -141,9 +143,11 @@ erDiagram
     USER ||--o{ USER_TICKET_QUOTA : has
     EVENT ||--|{ TICKET_TYPE : contains
     EVENT ||--o{ ORDER : belongs_to
+    EVENT ||--o{ VIP_GUEST : invites
     TICKET_TYPE ||--o{ TICKET : generates
     TICKET_TYPE ||--o{ ORDER_ITEM : included_in
     TICKET_TYPE ||--o{ USER_TICKET_QUOTA : tracks
+    TICKET_TYPE ||--o{ VIP_GUEST : assigns
     ORDER ||--|{ ORDER_ITEM : contains
     ORDER ||--o{ TICKET : includes
     ORDER ||--o{ PAYMENT : has
@@ -224,6 +228,19 @@ erDiagram
         string transaction_id
         datetime created_at
     }
+
+    VIP_GUEST {
+        int id PK
+        int event_id FK
+        int ticket_type_id FK
+        string name
+        string email UK
+        string phone
+        string qr_code_hash UK
+        boolean is_checked_in
+        datetime check_in_time
+        string device_id
+    }
 ```
 
 ---
@@ -302,19 +319,35 @@ erDiagram
 *   `transaction_id` (VARCHAR(150), NULL): Mã giao dịch trả về từ cổng thanh toán đối tác.
 *   `created_at` (TIMESTAMP, Default NOW()).
 
+##### Bảng `VipGuest` (Khách mời danh dự VIP)
+*   `id` (SERIAL, Primary Key): ID định danh khách mời.
+*   `event_id` (INT, Foreign Key references `Event.id`): ID sự kiện khách được mời.
+*   `ticket_type_id` (INT, Foreign Key references `TicketType.id`): Hạng vé mời VIP của khách.
+*   `name` (VARCHAR(100)): Họ tên khách mời.
+*   `email` (VARCHAR(150)): Email nhận thư mời.
+*   `phone` (VARCHAR(20), NULL): Số điện thoại khách mời.
+*   `qr_code_hash` (VARCHAR(100), Unique Index): Chuỗi băm ngẫu nhiên mã QR dùng để quét soát vé mời VIP.
+*   `is_checked_in` (BOOLEAN, Default FALSE): Trạng thái check-in.
+*   `check_in_time` (TIMESTAMP, NULL): Thời gian check-in.
+*   `device_id` (VARCHAR(100), NULL): ID thiết bị thực hiện quét check-in.
+*   *Chỉ mục duy nhất kép*: (`event_id`, `email`) đảm bảo một người không nhận 2 vé VIP cho 1 sự kiện.
+
 ---
 
 #### B. Cấu trúc bộ nhớ đệm (Redis Key Schema)
 
 Để hỗ trợ việc xử lý lượng truy cập cực lớn và các hoạt động thời gian thực đòi hỏi độ trễ cực thấp, hệ thống lưu các key có cấu trúc trên Redis như sau:
 
-| Tên Key Redis | Loại dữ liệu | Mục đích | Thời gian sống (TTL) |
-| :--- | :--- | :--- | :--- |
-| `events:published` | **String** (JSON) | Lưu danh sách các sự kiện đã được xuất bản và số vé còn lại với mỗi loại vé | Vô hạn (hoặc cho tới khi sự kiện kết thúc). |
-| `event:{event_id}:type:{ticket_type_id}:available` | **String** (Number) | Lưu trữ số vé còn lại khả dụng của hạng vé cụ thể phục vụ việc Check & Hold siêu tốc bằng Lua Script. | Vô hạn (hoặc cho tới khi sự kiện kết thúc). |
-| `user:{user_id}:event:{event_id}:type:{ticket_type_id}:bought` | **String** (Number) | Lưu số lượng vé hạng này mà user cụ thể đã mua/đang giữ để kiểm tra quota limit. | Vô hạn (hoặc cập nhật lại khi hủy order quá hạn). |
-| `payment:idem:{idempotency_key}` | **String** (URL) | Cache URL thanh toán VNPAY của hóa đơn tương ứng để trả lại ngay nếu người dùng click đúp hoặc mạng retry. | `3600` giây (1 giờ). |
-| `rate_limit:{ip}` | **Hash** | Lưu trữ số lượng token còn lại và mốc thời gian Refill cuối cùng cho thuật toán Token Bucket. | `10` giây. |
+| Tên Key Redis                                                  | Loại dữ liệu        | Mục đích                                                                                                   | Thời gian sống (TTL)                              |
+| :------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
+| `events:published`                                             | **String** (JSON)   | Lưu danh sách các sự kiện đã được xuất bản và số vé còn lại với mỗi loại vé                                | Vô hạn (hoặc cho tới khi sự kiện kết thúc).       |
+| `event:{event_id}:detail`                                      | **String** (JSON)   | Lưu thông tin tĩnh (tên, mô tả, địa điểm...) của sự kiện cụ thể.                                           | `600` giây (10 phút).                             |
+| `event:{event_id}:type:{ticket_type_id}:available`             | **String** (Number) | Lưu trữ số vé còn lại khả dụng của hạng vé cụ thể phục vụ việc Check & Hold siêu tốc bằng Lua Script.      | Vô hạn (hoặc cho tới khi sự kiện kết thúc).       |
+| `user:{user_id}:event:{event_id}:type:{ticket_type_id}:bought` | **String** (Number) | Lưu số lượng vé hạng này mà user cụ thể đã mua/đang giữ để kiểm tra quota limit.                           | Vô hạn (hoặc cập nhật lại khi hủy order quá hạn). |
+| `waiting_room:{event_id}`                                      | **Sorted Set**      | Hàng đợi xếp hàng mua vé cho concert theo thứ tự thời gian.                                                | Vô hạn (hoặc dọn dẹp khi hết sự kiện).            |
+| `can_proceed:{user_id}:{event_id}`                             | **String**          | Flag cho phép người dùng được bỏ qua hàng chờ và tiến hành hold vé/thanh toán.                             | `120` giây (2 phút).                              |
+| `payment:idem:{idempotency_key}`                               | **String** (URL)    | Cache URL thanh toán VNPAY của hóa đơn tương ứng để trả lại ngay nếu người dùng click đúp hoặc mạng retry. | `3600` giây (1 giờ).                              |
+| `rate_limit:{ip}`                                              | **Hash**            | Lưu trữ số lượng token còn lại và mốc thời gian Refill cuối cùng cho thuật toán Token Bucket.              | `10` giây. |
 
 ---
 
@@ -389,8 +422,8 @@ erDiagram
 *   **Các phương án**:
     1.  *API upload thủ công*: Admin phải dậy lúc nửa đêm tải file. *Trade-off*: Bất tiện.
     2.  *Cronjob định kỳ quét thư mục/SFTP/Cloud Storage*: *Trade-off*: Phải quản lý trạng thái file (đã đọc/chưa đọc/lỗi).
-*   **Chốt phương án**: **Worker định kỳ đọc file (Cronjob + Status Tracking)**.
-    *   *Lý do*: Hệ thống tự động pull file CSV. Worker chạy nền (không ảnh hưởng luồng chính), validate dữ liệu. Lưu kết quả xử lý (dòng nào lỗi, trùng lặp) để admin review vào sáng hôm sau. Upsert dữ liệu vào DB (Update nếu trùng ID, Insert nếu mới). Tự động bỏ qua lỗi từng dòng để không gián đoạn toàn batch.
+*   **Chốt phương án**: **AI Service định kỳ đọc file (Cronjob + Status Tracking)**.
+    *   *Lý do*: Hệ thống tự động pull file CSV. AI Service chạy nền (không ảnh hưởng luồng chính), validate dữ liệu. Lưu kết quả xử lý (dòng nào lỗi, trùng lặp) để admin review vào sáng hôm sau. Ghi dữ liệu trực tiếp vào bảng `VipGuest` liên kết với sự kiện (bỏ qua nếu trùng email và sự kiện để tránh trùng lặp vé mời VIP). Tự động bỏ qua lỗi từng dòng để không gián đoạn toàn bộ batch.
 
 ---
 

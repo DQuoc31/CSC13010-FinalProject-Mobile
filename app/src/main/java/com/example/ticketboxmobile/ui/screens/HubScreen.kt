@@ -24,6 +24,8 @@ import com.example.ticketboxmobile.network.SyncTicketRequest
 import com.example.ticketboxmobile.network.TicketTypeResponse
 import com.example.ticketboxmobile.p2p.P2PManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,10 +143,21 @@ fun HubScreen(
         )
     }
 
+    var selectedEventId by remember { mutableStateOf<Int?>(null) }
+
     if (showTypeDialog) {
         AlertDialog(
-            onDismissRequest = { showTypeDialog = false },
-            title = { Text("Chọn sự kiện và loại vé", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { 
+                showTypeDialog = false 
+                selectedEventId = null
+            },
+            title = { 
+                if (selectedEventId == null) {
+                    Text("1. Chọn sự kiện", fontWeight = FontWeight.Bold) 
+                } else {
+                    Text("2. Chọn hạng vé", fontWeight = FontWeight.Bold) 
+                }
+            },
             text = {
                 if (isFetching) {
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -152,28 +165,78 @@ fun HubScreen(
                     }
                 } else {
                     LazyColumn {
-                        items(ticketTypes) { type ->
-                            ElevatedCard(
-                                onClick = { typeToDownload = type },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                colors = CardDefaults.elevatedCardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        if (selectedEventId == null) {
+                            val distinctEvents = ticketTypes.distinctBy { it.event_id }
+                            items(distinctEvents) { event ->
+                                val gradientColors = listOf(
+                                    listOf(Color(0xFF5f2c82), Color(0xFF49a09d)), // Purple to Teal
+                                    listOf(Color(0xFF00B14F), Color(0xFF00D25B)), // Ticketbox Green
+                                    listOf(Color(0xFFcb2d3e), Color(0xFFef8e38)), // Red to Orange
+                                    listOf(Color(0xFF1F1C2C), Color(0xFF928DAB))  // Dark to Light Grey
                                 )
-                            ) {
-                                Text(
-                                    text = type.title,
-                                    modifier = Modifier.padding(16.dp),
-                                    fontWeight = FontWeight.Medium
-                                )
+                                val colors = gradientColors[event.event_id % gradientColors.size]
+                                
+                                ElevatedCard(
+                                    onClick = { selectedEventId = event.event_id },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(160.dp)
+                                        .padding(vertical = 8.dp),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Brush.linearGradient(colors))
+                                            .padding(20.dp)
+                                    ) {
+                                        Text(
+                                            text = event.event_title ?: event.title.substringAfter(" - ", event.title),
+                                            style = MaterialTheme.typography.headlineSmall,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White,
+                                            modifier = Modifier.align(Alignment.BottomStart)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            val eventTicketTypes = ticketTypes.filter { it.event_id == selectedEventId }
+                            items(eventTicketTypes) { type ->
+                                ElevatedCard(
+                                    onClick = { 
+                                        typeToDownload = type 
+                                        selectedEventId = null
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    colors = CardDefaults.elevatedCardColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                ) {
+                                    Text(
+                                        text = type.name ?: type.title.substringBefore(" - ", type.title),
+                                        modifier = Modifier.padding(16.dp),
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showTypeDialog = false }) { Text("Đóng") }
+                TextButton(onClick = { 
+                    showTypeDialog = false 
+                    selectedEventId = null
+                }) { Text("Đóng") }
+            },
+            dismissButton = {
+                if (selectedEventId != null) {
+                    TextButton(onClick = { selectedEventId = null }) { Text("Quay lại") }
+                }
             }
         )
     }
@@ -189,8 +252,9 @@ fun HubScreen(
                 } else if (ticket.isCheckedIn) {
                     "USED"
                 } else {
-                    ticketDao.updateTicket(qrHash, "VALID", true, System.currentTimeMillis(), "HUB_DEVICE")
-                    "VALID"
+                    val nextStatus = if (ticket.status == "VIP_GUEST") "VIP_GUEST" else "VALID"
+                    ticketDao.updateTicket(qrHash, nextStatus, true, System.currentTimeMillis(), "HUB_DEVICE")
+                    nextStatus
                 }
                 p2pManager.sendValidationResult(endpointId, result)
             }

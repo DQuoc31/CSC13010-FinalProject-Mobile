@@ -118,6 +118,7 @@ class P2PManager(private val context: Context) {
             addLog("Đã gửi mã $qrHash tới Hub")
         } ?: run {
             addLog("Lỗi: Chưa kết nối với Máy trưởng")
+            _validationResult.value = "DISCONNECTED"
         }
     }
 

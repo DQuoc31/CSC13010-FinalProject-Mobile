@@ -63,7 +63,7 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun TicketboxMobileTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = true, // Forced Dark Mode to match Ticketbox UI
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = false, // Disabled to enforce our premium vibrant look
     content: @Composable () -> Unit

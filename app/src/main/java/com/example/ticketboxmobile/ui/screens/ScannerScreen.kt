@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -93,10 +94,22 @@ fun ScannerScreen(
     LaunchedEffect(validationResult) {
         if (validationResult != null) {
             // Show result temporarily, then allow next scan
-            kotlinx.coroutines.delay(2500)
+            kotlinx.coroutines.delay(2000)
             p2pManager.clearValidationResult()
             scannedCode = null
             isScanningEnabled = true
+        }
+    }
+
+    // Effect to handle timeout if Hub doesn't respond or is disconnected
+    LaunchedEffect(scannedCode, validationResult) {
+        if (scannedCode != null && validationResult == null) {
+            kotlinx.coroutines.delay(3000) // 3 seconds timeout
+            if (validationResult == null) {
+                p2pManager.addLog("Quá thời gian chờ phản hồi từ Hub")
+                scannedCode = null
+                isScanningEnabled = true
+            }
         }
     }
 
@@ -128,17 +141,18 @@ fun ScannerScreen(
                         val mediaImage = imageProxy.image
                         if (mediaImage != null) {
                             val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-                            val scanner = BarcodeScanning.getClient()
+                            val options = com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
+                                .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ALL_FORMATS)
+                                .build()
+                            val scanner = BarcodeScanning.getClient(options)
                             scanner.process(image)
                                 .addOnSuccessListener { barcodes ->
                                     for (barcode in barcodes) {
-                                        if (barcode.valueType == Barcode.TYPE_TEXT) {
-                                            val qrValue = barcode.rawValue
-                                            if (qrValue != null && isScanningEnabled) {
-                                                isScanningEnabled = false
-                                                scannedCode = qrValue
-                                                p2pManager.sendQrHashToHub(qrValue)
-                                            }
+                                        val qrValue = barcode.rawValue
+                                        if (qrValue != null && isScanningEnabled) {
+                                            isScanningEnabled = false
+                                            scannedCode = qrValue
+                                            p2pManager.sendQrHashToHub(qrValue)
                                         }
                                     }
                                 }
@@ -226,22 +240,28 @@ fun ScannerScreen(
             ) {
                 val color = when (validationResult) {
                     "VALID" -> scan_valid_bg
+                    "VIP_GUEST" -> Color(0xFFFFD700)
                     "USED" -> scan_used_bg
                     "INVALID" -> scan_invalid_bg
+                    "DISCONNECTED" -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.primary
                 }
                 
                 val icon = when (validationResult) {
                     "VALID" -> Icons.Default.CheckCircle
+                    "VIP_GUEST" -> Icons.Default.Star
                     "USED" -> Icons.Default.Warning
                     "INVALID" -> Icons.Default.Clear
+                    "DISCONNECTED" -> Icons.Default.Warning
                     else -> null
                 }
                 
                 val textMsg = when (validationResult) {
                     "VALID" -> "VÉ HỢP LỆ"
+                    "VIP_GUEST" -> "VÉ KHÁCH MỜI VIP"
                     "USED" -> "VÉ ĐÃ SỬ DỤNG!"
                     "INVALID" -> "VÉ KHÔNG TỒN TẠI"
+                    "DISCONNECTED" -> "CHƯA KẾT NỐI HUB"
                     else -> "ĐANG XÁC THỰC..."
                 }
 

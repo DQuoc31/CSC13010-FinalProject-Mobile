@@ -1,5 +1,6 @@
 package com.example.ticketboxmobile.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,6 +14,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,43 +78,46 @@ fun RoleSelectionScreen(
             ElevatedCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)
                     .clickable {
                         pendingRole = "HUB"
                         showConfirmDialog = true
                     },
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 8.dp)
             ) {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .background(Brush.linearGradient(listOf(Color(0xFF00B14F), Color(0xFF009845))))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Home,
-                        contentDescription = "Máy trưởng",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Khởi tạo Máy Trưởng (Hub)",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Tải dữ liệu từ server và chia sẻ cho máy quét",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Home,
+                            contentDescription = "Máy trưởng",
+                            modifier = Modifier.size(48.dp),
+                            tint = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Khởi tạo Máy Trưởng (Hub)",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Tải dữ liệu từ server và chia sẻ cho máy quét",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
                 }
             }
 
@@ -120,43 +126,46 @@ fun RoleSelectionScreen(
             ElevatedCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)
                     .clickable {
                         pendingRole = "SCANNER"
                         showConfirmDialog = true
                     },
                 shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                ),
-                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.elevatedCardElevation(defaultElevation = 8.dp)
             ) {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .background(Brush.linearGradient(listOf(Color(0xFF1E1E1E), Color(0xFF2A2A2A))))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Máy quét",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.secondary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Chế độ Máy Quét (Scanner)",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Quét mã QR và đối chiếu qua Máy Trưởng",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Máy quét",
+                            modifier = Modifier.size(48.dp),
+                            tint = Color(0xFF00B14F)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Chế độ Máy Quét (Scanner)",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Quét mã QR và đối chiếu qua Máy Trưởng",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
                 }
             }
         }

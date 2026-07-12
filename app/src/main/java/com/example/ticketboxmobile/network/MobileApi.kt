@@ -9,7 +9,9 @@ import retrofit2.http.Path
 data class TicketTypeResponse(
     val id: Int,
     val event_id: Int,
-    val title: String
+    val title: String,
+    val name: String?,
+    val event_title: String?
 )
 
 data class TicketResponse(

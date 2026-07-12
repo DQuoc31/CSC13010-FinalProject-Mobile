@@ -5,16 +5,15 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val apiUrl = rootProject.file("local.properties").let { file ->
+    if (file.exists()) {
+        file.readLines().find { it.startsWith("BASE_URL=") }?.substringAfter("=")
+    } else null
+} ?: "\"http://10.0.2.2:3000\""
+
 android {
     namespace = "com.example.ticketboxmobile"
     compileSdk = 36
-
-    val localProperties = java.util.Properties()
-    val localPropertiesFile = rootProject.file("local.properties")
-    if (localPropertiesFile.exists()) {
-        localProperties.load(java.io.FileInputStream(localPropertiesFile))
-    }
-    val apiUrl = localProperties.getProperty("BASE_URL") ?: "\"http://10.0.2.2:3000\""
 
     defaultConfig {
         applicationId = "com.example.ticketboxmobile"
