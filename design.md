@@ -64,15 +64,15 @@ C4Container
         
         Container(api_gateway, "API Gateway", "Nginx / Kong", "Rate Limiting, Routing, Auth")
         
-        Container(booking_service, "Booking Service", "Node.js/Go", "Mua vé, giữ chỗ, Virtual Waiting Room")
-        Container(event_service, "Event Service", "Node.js/Go", "Quản lý concert, sơ đồ ghế")
-        Container(payment_service, "Payment Service", "Node.js/Go", "Thanh toán, chống trừ 2 lần")
+        Container(booking_service, "Booking Service", "Node.js", "Mua vé, giữ chỗ, Virtual Waiting Room & Import CSV")
+        Container(event_service, "Event Service", "Node.js", "Quản lý concert, sơ đồ ghế")
+        Container(payment_service, "Payment Service", "Node.js", "Thanh toán, chống trừ 2 lần")
         Container(email_service, "Email Service", "Node.js", "Gửi E-Ticket và nhắc nhở")
-        Container(ai_service, "AI Service", "Python/Node.js", "Import CSV, Xử lý AI")
+        Container(ai_service, "AI Service", "Node.js", "Trích xuất Press Kit & Tích hợp OpenRouter")
         
         ContainerDb(db_postgres, "Relational Database", "PostgreSQL", "Lưu Data: User, Event, Order")
         ContainerDb(db_redis, "In-Memory Store", "Redis", "Cache, Rate Limiting, Lua Script khóa vé")
-        ContainerDb(msg_broker, "Message Broker", "RabbitMQ / Kafka", "Giao tiếp bất đồng bộ")
+        ContainerDb(msg_broker, "Message Broker", "RabbitMQ", "Giao tiếp bất đồng bộ")
     }
     
     Rel(customer, web_app, "Dùng")
@@ -96,6 +96,92 @@ C4Container
     Rel(msg_broker, payment_service, "Subscribe")
     Rel(msg_broker, email_service, "Subscribe")
     Rel(msg_broker, ai_service, "Subscribe")
+    Rel(msg_broker, booking_service, "Subscribe")
+```
+
+### 2.3. Sơ đồ kiến trúc luồng dữ liệu (High-Level Data Flow)
+
+Dưới đây là sơ đồ kiến trúc tổng quan luồng dữ liệu tích hợp từ lúc mua vé đến khi soát vé offline tại cổng sự kiện:
+
+#### A. Luồng mua vé và thanh toán tích hợp (Idempotency & Event-driven)
+Sơ đồ trình bày cách hệ thống xử lý giao dịch mua vé đồng thời, kiểm tra chống thanh toán lặp qua Idempotency Key, tích hợp cổng thanh toán bên thứ ba và cập nhật trạng thái bất đồng bộ qua RabbitMQ:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer as Khán giả
+    participant Gateway as API Gateway
+    participant Booking as Booking Service (Redis / SQL)
+    participant MQ as RabbitMQ
+    participant Payment as Payment Service
+    participant Bank as VNPAY / MoMo
+    participant Email as Email Service
+
+    Customer->>Gateway: POST /api/booking/hold (event_id, ticket_type_id, qty)
+    Gateway->>Booking: Chuyển tiếp request mua vé
+    Note over Booking: Chạy Lua Script trên Redis<br/>(Atomic: kiểm tra inventory & user quota)
+    Booking-->>Gateway: Trả về order_id (status: PENDING)
+    Gateway-->>Customer: Hiển thị giao diện thanh toán & order_id
+
+    Customer->>Gateway: POST /api/payment/pay (x-idempotency-key, order_id, amount)
+    Gateway->>Payment: Chuyển tiếp request thanh toán
+    Note over Payment: Kiểm tra x-idempotency-key trong Redis & DB<br/>Nếu có sẵn, trả về URL cũ ngay.
+    Payment->>Bank: Gọi API khởi tạo giao dịch (qua Circuit Breaker)
+    Bank-->>Payment: Trả về URL thanh toán đối tác
+    Payment-->>Gateway: Trả về URL checkout
+    Gateway-->>Customer: Redirect khán giả tới trang thanh toán ngân hàng
+
+    Customer->>Bank: Thực hiện thanh toán thành công
+    Bank->>Gateway: Webhook POST /api/payment/webhook/provider (payload ký số)
+    Gateway->>Payment: Chuyển tiếp Webhook
+    Note over Payment: Xác thực chữ ký số & cập nhật DB<br/>Order status -> COMPLETED<br/>Payment status -> SUCCESS
+    Payment->>MQ: Publish event: payment.success (order_id, user_id)
+    Payment-->>Bank: Phản hồi Webhook thành công (ok)
+
+    MQ->>Booking: Consume event: payment.success
+    Note over Booking: Cập nhật thông tin vé vật lý (Prisma)<br/>và chốt chặn quota người dùng vĩnh viễn trong DB
+    MQ->>Email: Consume event: payment.success
+    Note over Email: Sinh ảnh QR Code động cho vé<br/>Render email template sang trọng Gold/Black<br/>Gửi thư mời VIP/E-Ticket qua Nodemailer
+    Email-->>Customer: Nhận email E-Ticket kèm mã QR check-in
+```
+
+#### B. Sơ đồ kiến trúc soát vé offline và đồng bộ (Hub-Spoke P2P Connections)
+Sơ đồ mô tả quy trình thiết lập mạng ngang hàng (P2P) ngoại tuyến tại hiện trường sự kiện, đảm bảo không xảy ra hiện tượng quét lặp (Double Check-in) ngay cả khi mất kết nối Internet:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer as Khán giả
+    actor Staff as Nhân viên soát vé
+    participant Scanner as Máy quét (Spoke)
+    participant Hub as Máy trưởng (Hub)
+    participant Server as Backend Server (DB)
+
+    Note over Hub, Server: 1. Trước sự kiện (Online)
+    Hub->>Server: GET /api/tickets/sync-offline (event_id)
+    Server-->>Hub: Trả về danh sách vé hợp lệ (Room DB)
+    
+    Note over Customer, Hub: 2. Soát vé tại sự kiện (Offline P2P)
+    Customer->>Scanner: Trình mã QR vé (E-ticket/VIP)
+    Scanner->>Scanner: Quét QR & Trích xuất hash
+    Scanner->>Hub: Gửi yêu cầu soát vé qua Nearby Connections (P2P)
+    Note over Hub: Kiểm tra Room DB:<br/>- QR hợp lệ?<br/>- Đã check-in chưa?
+    alt Vé hợp lệ & Chưa check-in
+        Hub->>Hub: Cập nhật is_checked_in = true & check_in_time
+        Hub-->>Scanner: Phản hồi: VALID (Hợp lệ)
+        Scanner-->>Staff: Hiển thị Màn hình Xanh (Cho qua)
+    else Vé đã quét trước đó (Double Check-in)
+        Hub-->>Scanner: Phản hồi: INVALID (Đã quét lúc [Time] tại Cửa [X])
+        Scanner-->>Staff: Hiển thị Màn hình Đỏ (Cảnh báo trùng)
+    else Vé không tồn tại
+        Hub-->>Scanner: Phản hồi: INVALID (Vé không hợp lệ)
+        Scanner-->>Staff: Hiển thị Màn hình Đỏ (Cảnh báo vé giả)
+    end
+
+    Note over Hub, Server: 3. Sau sự kiện (Online)
+    Hub->>Server: POST /api/tickets/sync-online (check-in logs)
+    Server->>Server: Cập nhật trạng thái vé vào PostgreSQL
+    Server-->>Hub: Phản hồi đồng bộ thành công (Sync OK)
 ```
 
 ---
@@ -338,16 +424,16 @@ erDiagram
 
 Để hỗ trợ việc xử lý lượng truy cập cực lớn và các hoạt động thời gian thực đòi hỏi độ trễ cực thấp, hệ thống lưu các key có cấu trúc trên Redis như sau:
 
-| Tên Key Redis                                                  | Loại dữ liệu        | Mục đích                                                                                                   | Thời gian sống (TTL)                              |
-| :------------------------------------------------------------- | :------------------ | :--------------------------------------------------------------------------------------------------------- | :------------------------------------------------ |
-| `events:published`                                             | **String** (JSON)   | Lưu danh sách các sự kiện đã được xuất bản và số vé còn lại với mỗi loại vé                                | Vô hạn (hoặc cho tới khi sự kiện kết thúc).       |
-| `event:{event_id}:detail`                                      | **String** (JSON)   | Lưu thông tin tĩnh (tên, mô tả, địa điểm...) của sự kiện cụ thể.                                           | `600` giây (10 phút).                             |
-| `event:{event_id}:type:{ticket_type_id}:available`             | **String** (Number) | Lưu trữ số vé còn lại khả dụng của hạng vé cụ thể phục vụ việc Check & Hold siêu tốc bằng Lua Script.      | Vô hạn (hoặc cho tới khi sự kiện kết thúc).       |
-| `user:{user_id}:event:{event_id}:type:{ticket_type_id}:bought` | **String** (Number) | Lưu số lượng vé hạng này mà user cụ thể đã mua/đang giữ để kiểm tra quota limit.                           | Vô hạn (hoặc cập nhật lại khi hủy order quá hạn). |
-| `waiting_room:{event_id}`                                      | **Sorted Set**      | Hàng đợi xếp hàng mua vé cho concert theo thứ tự thời gian.                                                | Vô hạn (hoặc dọn dẹp khi hết sự kiện).            |
-| `can_proceed:{user_id}:{event_id}`                             | **String**          | Flag cho phép người dùng được bỏ qua hàng chờ và tiến hành hold vé/thanh toán.                             | `120` giây (2 phút).                              |
-| `payment:idem:{idempotency_key}`                               | **String** (URL)    | Cache URL thanh toán VNPAY của hóa đơn tương ứng để trả lại ngay nếu người dùng click đúp hoặc mạng retry. | `3600` giây (1 giờ).                              |
-| `rate_limit:{ip}`                                              | **Hash**            | Lưu trữ số lượng token còn lại và mốc thời gian Refill cuối cùng cho thuật toán Token Bucket.              | `10` giây. |
+| Tên Key Redis | Loại dữ liệu | Mục đích | Thời gian sống (TTL) |
+| :--- | :--- | :--- | :--- |
+| `events:published` | **String** (JSON) | Lưu danh sách các sự kiện đã được xuất bản và số vé còn lại với mỗi loại vé | Vô hạn (hoặc cho tới khi sự kiện kết thúc). |
+| `event:{event_id}:detail` | **String** (JSON) | Lưu thông tin tĩnh (tên, mô tả, địa điểm...) của sự kiện cụ thể. | `600` giây (10 phút). |
+| `event:{event_id}:type:{ticket_type_id}:available` | **String** (Number) | Lưu trữ số vé còn lại khả dụng của hạng vé cụ thể phục vụ việc Check & Hold siêu tốc bằng Lua Script. | Vô hạn (hoặc cho tới khi sự kiện kết thúc). |
+| `user:{user_id}:event:{event_id}:type:{ticket_type_id}:bought` | **String** (Number) | Lưu số lượng vé hạng này mà user cụ thể đã mua/đang giữ để kiểm tra quota limit. | Vô hạn (hoặc cập nhật lại khi hủy order quá hạn). |
+| `waiting_room:{event_id}` | **Sorted Set** | Hàng đợi xếp hàng mua vé cho concert theo thứ tự thời gian. | Vô hạn (hoặc dọn dẹp khi hết sự kiện). |
+| `can_proceed:{user_id}:{event_id}` | **String** | Flag cho phép người dùng được bỏ qua hàng chờ và tiến hành hold vé/thanh toán. | `120` giây (2 phút). |
+| `payment:idem:{idempotency_key}` | **String** (URL) | Cache URL thanh toán VNPAY của hóa đơn tương ứng để trả lại ngay nếu người dùng click đúp hoặc mạng retry. | `3600` giây (1 giờ). |
+| `rate_limit:{ip}` | **Hash** | Lưu trữ số lượng token còn lại và mốc thời gian Refill cuối cùng cho thuật toán Token Bucket. | `10` giây. |
 
 ---
 
@@ -365,7 +451,7 @@ erDiagram
 ### 4.2. Tranh chấp vé và Giới hạn Per-User (Concurrency Control)
 *   **Bài toán**: 200 vé SVIP bị hàng nghìn người tranh mua cùng lúc; giới hạn max vé/người.
 *   **Các phương án**:
-    1.  *Pessimistic Locking (SQL SELECT FOR UPDATE)*: *Trade-off*: An toàn nhưng lock row, gây nghẽn toàn bộ DB dưới tải cao.
+    1.  *Pessimistic Locking (SQL SELECT FOR UPDATE)*: *Trade-off*: An sau nhưng lock row, gây nghẽn toàn bộ DB dưới tải cao.
     2.  *Optimistic Locking (Version Column)*: *Trade-off*: Dễ conflict, request bị fail nhiều, user phải bấm lại.
     3.  *Redis Lua Script (Atomic Operations)*: Đưa logic kiểm tra số lượng vé còn lại và kiểm tra quota của user vào 1 script Lua chạy trên Redis. *Trade-off*: Cực kỳ nhanh, không bị Race Condition do Redis chạy single-thread.
 *   **Chốt phương án**: **Redis Lua Script**.
@@ -411,7 +497,7 @@ erDiagram
 ### 4.7. Môi trường hoạt động của Ứng dụng Soát vé (Staff App)
 *   **Bài toán**: Nhân sự soát vé cần thiết bị ổn định, tốc độ phản hồi nhanh và khả năng chạy offline P2P không bị ngắt quãng.
 *   **Các phương án**:
-    1.  *Cross-platform (iOS & Android) / BYOD (Bring Your Own Device)*: Cho phép nhân viên dùng điện thoại cá nhân, code bằng React Native/Flutter. *Trade-off*: Rủi ro vận hành rất lớn (hết pin, camera mờ, tin nhắn rác chen ngang lúc đang quét). Kỹ thuật phức tạp do iOS cực kỳ khắt khe với tác vụ chạy ngầm, thường tự động ngắt kết nối Wi-Fi Local/Bluetooth để tiết kiệm pin khiến hệ thống soát vé offline bị đứt gãy giữa chừng.
+    1.  *Cross-platform (iOS & Android) / BYOD (Bring Your Own Device)*: Cho phép nhân viên dùng điện thoại cá nhân, code bằng React Native/Flutter. *Trade-off*: Rủi ro vận hành rất lớn (hết pin, camera mờ, tin nhắn rác chi phối lúc đang quét). Kỹ thuật phức tạp do iOS cực kỳ khắt khe với tác vụ chạy ngầm, thường tự động ngắt kết nối Wi-Fi Local/Bluetooth để tiết kiệm pin khiến hệ thống soát vé offline bị đứt gãy giữa chừng.
     2.  *Android Native độc quyền*: Ban tổ chức thuê hoặc mua lô thiết bị Android (PDA chuyên dụng hoặc dòng máy giá rẻ). *Trade-off*: Tốn chi phí cấp phát phần cứng nhưng kiểm soát được 100% sự cố.
 *   **Chốt phương án**: **Phát triển Native độc quyền trên Android**.
     *   *Lý do Kỹ thuật*: Hệ điều hành Android hỗ trợ chuẩn Wi-Fi Direct mở, cho phép thiết lập mạng LAN ảo ngang hàng (P2P Mesh) bằng Google Nearby Connections cực kỳ ổn định. Nó không tự động kill các kết nối ngầm (background kill) như iOS. Việc phát triển thuần Native (Kotlin, Jetpack Compose) giúp tận dụng tối đa sức mạnh phần cứng, tối ưu hiệu năng CameraX và truy xuất Room Database (SQLite) tốc độ siêu tốc.
@@ -422,8 +508,8 @@ erDiagram
 *   **Các phương án**:
     1.  *API upload thủ công*: Admin phải dậy lúc nửa đêm tải file. *Trade-off*: Bất tiện.
     2.  *Cronjob định kỳ quét thư mục/SFTP/Cloud Storage*: *Trade-off*: Phải quản lý trạng thái file (đã đọc/chưa đọc/lỗi).
-*   **Chốt phương án**: **AI Service định kỳ đọc file (Cronjob + Status Tracking)**.
-    *   *Lý do*: Hệ thống tự động pull file CSV. AI Service chạy nền (không ảnh hưởng luồng chính), validate dữ liệu. Lưu kết quả xử lý (dòng nào lỗi, trùng lặp) để admin review vào sáng hôm sau. Ghi dữ liệu trực tiếp vào bảng `VipGuest` liên kết với sự kiện (bỏ qua nếu trùng email và sự kiện để tránh trùng lặp vé mời VIP). Tự động bỏ qua lỗi từng dòng để không gián đoạn toàn bộ batch.
+*   **Chốt phương án**: **Booking Service định kỳ đọc file (Cronjob + Status Tracking)**.
+    *   *Lý do*: Hệ thống tự động pull file CSV. Booking Service chạy nền (không ảnh hưởng luồng chính), validate dữ liệu. Lưu kết quả xử lý (dòng nào lỗi, trùng lặp) để admin review vào sáng hôm sau. Ghi dữ liệu trực tiếp vào bảng `VipGuest` liên kết với sự kiện (bỏ qua nếu trùng email và sự kiện để tránh trùng lặp vé mời VIP). Tự động bỏ qua lỗi từng dòng để không gián đoạn toàn bộ batch.
 
 ---
 
